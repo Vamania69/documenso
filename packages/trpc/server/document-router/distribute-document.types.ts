@@ -2,8 +2,6 @@ import { z } from 'zod';
 
 import { ZDocumentLiteSchema } from '@documenso/lib/types/document';
 import { ZDocumentEmailSettingsSchema } from '@documenso/lib/types/document-email';
-
-import type { TrpcRouteMeta } from '../trpc';
 import {
   ZDocumentMetaDateFormatSchema,
   ZDocumentMetaDistributionMethodSchema,
@@ -12,7 +10,10 @@ import {
   ZDocumentMetaRedirectUrlSchema,
   ZDocumentMetaSubjectSchema,
   ZDocumentMetaTimezoneSchema,
-} from './schema';
+} from '@documenso/lib/types/document-meta';
+import { zEmail } from '@documenso/lib/utils/zod';
+
+import type { TrpcRouteMeta } from '../trpc';
 
 export const distributeDocumentMeta: TrpcRouteMeta = {
   openapi: {
@@ -36,7 +37,7 @@ export const ZDistributeDocumentRequestSchema = z.object({
       redirectUrl: ZDocumentMetaRedirectUrlSchema.optional(),
       language: ZDocumentMetaLanguageSchema.optional(),
       emailId: z.string().nullish(),
-      emailReplyTo: z.string().email().nullish(),
+      emailReplyTo: zEmail().nullish(),
       emailSettings: ZDocumentEmailSettingsSchema.optional(),
     })
     .optional(),

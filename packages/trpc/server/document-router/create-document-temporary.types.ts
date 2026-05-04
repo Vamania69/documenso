@@ -1,4 +1,3 @@
-import { DocumentSigningOrder } from '@prisma/client';
 import { z } from 'zod';
 
 import { ZDocumentSchema } from '@documenso/lib/types/document';
@@ -6,8 +5,9 @@ import {
   ZDocumentAccessAuthTypesSchema,
   ZDocumentActionAuthTypesSchema,
 } from '@documenso/lib/types/document-auth';
-import { ZDocumentEmailSettingsSchema } from '@documenso/lib/types/document-email';
 import { ZDocumentFormValuesSchema } from '@documenso/lib/types/document-form-values';
+import { ZDocumentMetaCreateSchema } from '@documenso/lib/types/document-meta';
+import { ZEnvelopeAttachmentTypeSchema } from '@documenso/lib/types/envelope-attachment';
 import {
   ZFieldHeightSchema,
   ZFieldPageNumberSchema,
@@ -21,22 +21,13 @@ import { ZCreateRecipientSchema } from '../recipient-router/schema';
 import type { TrpcRouteMeta } from '../trpc';
 import {
   ZDocumentExternalIdSchema,
-  ZDocumentMetaDateFormatSchema,
-  ZDocumentMetaDistributionMethodSchema,
-  ZDocumentMetaDrawSignatureEnabledSchema,
-  ZDocumentMetaLanguageSchema,
-  ZDocumentMetaMessageSchema,
-  ZDocumentMetaRedirectUrlSchema,
-  ZDocumentMetaSubjectSchema,
-  ZDocumentMetaTimezoneSchema,
-  ZDocumentMetaTypedSignatureEnabledSchema,
-  ZDocumentMetaUploadSignatureEnabledSchema,
   ZDocumentTitleSchema,
   ZDocumentVisibilitySchema,
 } from './schema';
 
 /**
  * Temporariy endpoint for V2 Beta until we allow passthrough documents on create.
+ * @deprecated
  */
 export const createDocumentTemporaryMeta: TrpcRouteMeta = {
   openapi: {
@@ -46,6 +37,7 @@ export const createDocumentTemporaryMeta: TrpcRouteMeta = {
     description:
       'You will need to upload the PDF to the provided URL returned. Note: Once V2 API is released, this will be removed since we will allow direct uploads, instead of using an upload URL.',
     tags: ['Document'],
+    deprecated: true,
   },
 };
 
@@ -80,22 +72,16 @@ export const ZCreateDocumentTemporaryRequestSchema = z.object({
     )
 
     .optional(),
-  meta: z
-    .object({
-      subject: ZDocumentMetaSubjectSchema.optional(),
-      message: ZDocumentMetaMessageSchema.optional(),
-      timezone: ZDocumentMetaTimezoneSchema.optional(),
-      dateFormat: ZDocumentMetaDateFormatSchema.optional(),
-      distributionMethod: ZDocumentMetaDistributionMethodSchema.optional(),
-      signingOrder: z.nativeEnum(DocumentSigningOrder).optional(),
-      redirectUrl: ZDocumentMetaRedirectUrlSchema.optional(),
-      language: ZDocumentMetaLanguageSchema.optional(),
-      typedSignatureEnabled: ZDocumentMetaTypedSignatureEnabledSchema.optional(),
-      drawSignatureEnabled: ZDocumentMetaDrawSignatureEnabledSchema.optional(),
-      uploadSignatureEnabled: ZDocumentMetaUploadSignatureEnabledSchema.optional(),
-      emailSettings: ZDocumentEmailSettingsSchema.optional(),
-    })
+  attachments: z
+    .array(
+      z.object({
+        label: z.string().min(1, 'Label is required'),
+        data: z.string().url('Must be a valid URL'),
+        type: ZEnvelopeAttachmentTypeSchema.optional().default('link'),
+      }),
+    )
     .optional(),
+  meta: ZDocumentMetaCreateSchema.optional(),
 });
 
 export const ZCreateDocumentTemporaryResponseSchema = z.object({

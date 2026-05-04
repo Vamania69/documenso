@@ -1,10 +1,18 @@
 import { createElement } from 'react';
 
 import { msg } from '@lingui/core/macro';
-import { DocumentStatus, OrganisationType, RecipientRole, SigningStatus } from '@prisma/client';
+import {
+  DocumentStatus,
+  EnvelopeType,
+  OrganisationType,
+  RecipientRole,
+  SigningStatus,
+  WebhookTriggerEvents,
+} from '@prisma/client';
 
 import { mailer } from '@documenso/email/mailer';
 import { DocumentInviteEmailTemplate } from '@documenso/email/templates/document-invite';
+import { resolveExpiresAt } from '@documenso/lib/constants/envelope-expiration';
 import {
   RECIPIENT_ROLES_DESCRIPTION,
   RECIPIENT_ROLE_TO_EMAIL_TYPE,
@@ -18,13 +26,20 @@ import { prisma } from '@documenso/prisma';
 import { getI18nInstance } from '../../client-only/providers/i18n-server';
 import { NEXT_PUBLIC_WEBAPP_URL } from '../../constants/app';
 import { extractDerivedDocumentEmailSettings } from '../../types/document-email';
+import {
+  ZWebhookDocumentSchema,
+  mapEnvelopeToWebhookDocumentPayload,
+} from '../../types/webhook-payload';
 import { isDocumentCompleted } from '../../utils/document';
+import type { EnvelopeIdOptions } from '../../utils/envelope';
+import { isRecipientEmailValidForSending } from '../../utils/recipients';
 import { renderEmailWithI18N } from '../../utils/render-email-with-i18n';
 import { getEmailContext } from '../email/get-email-context';
-import { getDocumentWhereInput } from './get-document-by-id';
+import { getEnvelopeWhereInput } from '../envelope/get-envelope-by-id';
+import { triggerWebhook } from '../webhooks/trigger/trigger-webhook';
 
 export type ResendDocumentOptions = {
-  documentId: number;
+  id: EnvelopeIdOptions;
   userId: number;
   recipients: number[];
   teamId: number;
@@ -32,26 +47,32 @@ export type ResendDocumentOptions = {
 };
 
 export const resendDocument = async ({
-  documentId,
+  id,
   userId,
   recipients,
   teamId,
   requestMetadata,
-}: ResendDocumentOptions): Promise<void> => {
+}: ResendDocumentOptions) => {
   const user = await prisma.user.findFirstOrThrow({
     where: {
       id: userId,
     },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+    },
   });
 
-  const { documentWhereInput } = await getDocumentWhereInput({
-    documentId,
+  const { envelopeWhereInput } = await getEnvelopeWhereInput({
+    id,
+    type: EnvelopeType.DOCUMENT,
     userId,
     teamId,
   });
 
-  const document = await prisma.document.findUnique({
-    where: documentWhereInput,
+  const envelope = await prisma.envelope.findUnique({
+    where: envelopeWhereInput,
     include: {
       recipients: true,
       documentMeta: true,
@@ -64,35 +85,53 @@ export const resendDocument = async ({
     },
   });
 
-  const customEmail = document?.documentMeta;
-
-  if (!document) {
+  if (!envelope) {
     throw new Error('Document not found');
   }
 
-  if (document.recipients.length === 0) {
+  if (envelope.recipients.length === 0) {
     throw new Error('Document has no recipients');
   }
 
-  if (document.status === DocumentStatus.DRAFT) {
+  if (envelope.status === DocumentStatus.DRAFT) {
     throw new Error('Can not send draft document');
   }
 
-  if (isDocumentCompleted(document.status)) {
+  if (isDocumentCompleted(envelope.status)) {
     throw new Error('Can not send completed document');
   }
 
-  const recipientsToRemind = document.recipients.filter(
+  // Refresh the expiresAt on each resent recipient.
+  const expiresAt = resolveExpiresAt(envelope.documentMeta?.envelopeExpirationPeriod ?? null);
+
+  const recipientsToRemind = envelope.recipients.filter(
     (recipient) =>
-      recipients.includes(recipient.id) && recipient.signingStatus === SigningStatus.NOT_SIGNED,
+      recipients.includes(recipient.id) &&
+      recipient.signingStatus === SigningStatus.NOT_SIGNED &&
+      recipient.role !== RecipientRole.CC,
   );
 
+  // Extend the expiration deadline for recipients being resent.
+  if (expiresAt && recipientsToRemind.length > 0) {
+    await prisma.recipient.updateMany({
+      where: {
+        id: {
+          in: recipientsToRemind.map((r) => r.id),
+        },
+      },
+      data: {
+        expiresAt,
+        expirationNotifiedAt: null,
+      },
+    });
+  }
+
   const isRecipientSigningRequestEmailEnabled = extractDerivedDocumentEmailSettings(
-    document.documentMeta,
+    envelope.documentMeta,
   ).recipientSigningRequest;
 
   if (!isRecipientSigningRequestEmailEnabled) {
-    return;
+    return envelope;
   }
 
   const { branding, emailLanguage, organisationType, senderEmail, replyToEmail } =
@@ -100,14 +139,14 @@ export const resendDocument = async ({
       emailType: 'RECIPIENT',
       source: {
         type: 'team',
-        teamId: document.teamId,
+        teamId: envelope.teamId,
       },
-      meta: document.documentMeta,
+      meta: envelope.documentMeta,
     });
 
   await Promise.all(
     recipientsToRemind.map(async (recipient) => {
-      if (recipient.role === RecipientRole.CC) {
+      if (recipient.role === RecipientRole.CC || !isRecipientEmailValidForSending(recipient)) {
         return;
       }
 
@@ -122,42 +161,42 @@ export const resendDocument = async ({
         ._(RECIPIENT_ROLES_DESCRIPTION[recipient.role].actionVerb)
         .toLowerCase();
 
-      let emailMessage = customEmail?.message || '';
+      let emailMessage = envelope.documentMeta.message || '';
       let emailSubject = i18n._(msg`Reminder: Please ${recipientActionVerb} this document`);
 
       if (selfSigner) {
         emailMessage = i18n._(
-          msg`You have initiated the document ${`"${document.title}"`} that requires you to ${recipientActionVerb} it.`,
+          msg`You have initiated the document ${`"${envelope.title}"`} that requires you to ${recipientActionVerb} it.`,
         );
         emailSubject = i18n._(msg`Reminder: Please ${recipientActionVerb} your document`);
       }
 
       if (organisationType === OrganisationType.ORGANISATION) {
         emailSubject = i18n._(
-          msg`Reminder: ${document.team.name} invited you to ${recipientActionVerb} a document`,
+          msg`Reminder: ${envelope.team.name} invited you to ${recipientActionVerb} a document`,
         );
         emailMessage =
-          customEmail?.message ||
+          envelope.documentMeta.message ||
           i18n._(
-            msg`${user.name || user.email} on behalf of "${document.team.name}" has invited you to ${recipientActionVerb} the document "${document.title}".`,
+            msg`${user.name || user.email} on behalf of "${envelope.team.name}" has invited you to ${recipientActionVerb} the document "${envelope.title}".`,
           );
       }
 
       const customEmailTemplate = {
         'signer.name': name,
         'signer.email': email,
-        'document.name': document.title,
+        'document.name': envelope.title,
       };
 
       const assetBaseUrl = NEXT_PUBLIC_WEBAPP_URL() || 'http://localhost:3000';
       const signDocumentLink = `${NEXT_PUBLIC_WEBAPP_URL()}/sign/${recipient.token}`;
 
       const template = createElement(DocumentInviteEmailTemplate, {
-        documentName: document.title,
+        documentName: envelope.title,
         inviterName: user.name || undefined,
         inviterEmail:
           organisationType === OrganisationType.ORGANISATION
-            ? document.team?.teamEmail?.email || user.email
+            ? envelope.team?.teamEmail?.email || user.email
             : user.email,
         assetBaseUrl,
         signDocumentLink,
@@ -165,7 +204,7 @@ export const resendDocument = async ({
         role: recipient.role,
         selfSigner,
         organisationType,
-        teamName: document.team?.name,
+        teamName: envelope.team?.name,
       });
 
       const [html, text] = await Promise.all([
@@ -180,43 +219,49 @@ export const resendDocument = async ({
         }),
       ]);
 
-      await prisma.$transaction(
-        async (tx) => {
-          await mailer.sendMail({
-            to: {
-              address: email,
-              name,
-            },
-            from: senderEmail,
-            replyTo: replyToEmail,
-            subject: customEmail?.subject
-              ? renderCustomEmailTemplate(
-                  i18n._(msg`Reminder: ${customEmail.subject}`),
-                  customEmailTemplate,
-                )
-              : emailSubject,
-            html,
-            text,
-          });
-
-          await tx.documentAuditLog.create({
-            data: createDocumentAuditLogData({
-              type: DOCUMENT_AUDIT_LOG_TYPE.EMAIL_SENT,
-              documentId: document.id,
-              metadata: requestMetadata,
-              data: {
-                emailType: recipientEmailType,
-                recipientEmail: recipient.email,
-                recipientName: recipient.name,
-                recipientRole: recipient.role,
-                recipientId: recipient.id,
-                isResending: true,
-              },
-            }),
-          });
+      // Send email outside any transaction to avoid holding a connection
+      // open during network I/O.
+      await mailer.sendMail({
+        to: {
+          address: email,
+          name,
         },
-        { timeout: 30_000 },
-      );
+        from: senderEmail,
+        replyTo: replyToEmail,
+        subject: envelope.documentMeta.subject
+          ? renderCustomEmailTemplate(
+              i18n._(msg`Reminder: ${envelope.documentMeta.subject}`),
+              customEmailTemplate,
+            )
+          : emailSubject,
+        html,
+        text,
+      });
+
+      await prisma.documentAuditLog.create({
+        data: createDocumentAuditLogData({
+          type: DOCUMENT_AUDIT_LOG_TYPE.EMAIL_SENT,
+          envelopeId: envelope.id,
+          metadata: requestMetadata,
+          data: {
+            emailType: recipientEmailType,
+            recipientEmail: recipient.email,
+            recipientName: recipient.name,
+            recipientRole: recipient.role,
+            recipientId: recipient.id,
+            isResending: true,
+          },
+        }),
+      });
     }),
   );
+
+  await triggerWebhook({
+    event: WebhookTriggerEvents.DOCUMENT_REMINDER_SENT,
+    data: ZWebhookDocumentSchema.parse(mapEnvelopeToWebhookDocumentPayload(envelope)),
+    userId: envelope.userId,
+    teamId: envelope.teamId,
+  });
+
+  return envelope;
 };

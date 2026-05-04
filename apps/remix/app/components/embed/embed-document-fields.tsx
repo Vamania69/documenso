@@ -1,4 +1,4 @@
-import type { DocumentMeta, TemplateMeta } from '@prisma/client';
+import type { DocumentMeta } from '@prisma/client';
 import { type Field, FieldType } from '@prisma/client';
 import { match } from 'ts-pattern';
 
@@ -33,7 +33,7 @@ import { DocumentSigningTextField } from '~/components/general/document-signing/
 export type EmbedDocumentFieldsProps = {
   fields: Field[];
   metadata?: Pick<
-    DocumentMeta | TemplateMeta,
+    DocumentMeta,
     | 'timezone'
     | 'dateFormat'
     | 'typedSignatureEnabled'
@@ -50,10 +50,8 @@ export const EmbedDocumentFields = ({
   onSignField,
   onUnsignField,
 }: EmbedDocumentFieldsProps) => {
-  const highestPageNumber = Math.max(...fields.map((field) => field.page));
-
   return (
-    <ElementVisible target={`${PDF_VIEWER_PAGE_SELECTOR}[data-page-number="${highestPageNumber}"]`}>
+    <ElementVisible target={PDF_VIEWER_PAGE_SELECTOR}>
       {fields.map((field) =>
         match(field.type)
           .with(FieldType.SIGNATURE, () => (

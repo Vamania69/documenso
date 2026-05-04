@@ -1,11 +1,12 @@
 import { createElement } from 'react';
 
 import { msg } from '@lingui/core/macro';
-import { SendStatus, SigningStatus } from '@prisma/client';
+import { EnvelopeType, SendStatus, SigningStatus } from '@prisma/client';
 
 import { mailer } from '@documenso/email/mailer';
 import DocumentRejectedEmail from '@documenso/email/templates/document-rejected';
 import DocumentRejectionConfirmedEmail from '@documenso/email/templates/document-rejection-confirmed';
+import { isRecipientEmailValidForSending } from '@documenso/lib/utils/recipients';
 import { prisma } from '@documenso/prisma';
 
 import { getI18nInstance } from '../../../client-only/providers/i18n-server';
@@ -13,6 +14,7 @@ import { NEXT_PUBLIC_WEBAPP_URL } from '../../../constants/app';
 import { DOCUMENSO_INTERNAL_EMAIL } from '../../../constants/email';
 import { getEmailContext } from '../../../server-only/email/get-email-context';
 import { extractDerivedDocumentEmailSettings } from '../../../types/document-email';
+import { unsafeBuildEnvelopeIdQuery } from '../../../utils/envelope';
 import { renderEmailWithI18N } from '../../../utils/render-email-with-i18n';
 import { formatDocumentsPath } from '../../../utils/teams';
 import type { JobRunIO } from '../../client/_internal/job';
@@ -27,11 +29,15 @@ export const run = async ({
 }) => {
   const { documentId, recipientId } = payload;
 
-  const [document, recipient] = await Promise.all([
-    prisma.document.findFirstOrThrow({
-      where: {
-        id: documentId,
-      },
+  const [envelope, recipient] = await Promise.all([
+    prisma.envelope.findFirstOrThrow({
+      where: unsafeBuildEnvelopeIdQuery(
+        {
+          type: 'documentId',
+          id: documentId,
+        },
+        EnvelopeType.DOCUMENT,
+      ),
       include: {
         user: {
           select: {
@@ -58,10 +64,10 @@ export const run = async ({
     }),
   ]);
 
-  const { user: documentOwner } = document;
+  const { user: documentOwner } = envelope;
 
   const isEmailEnabled = extractDerivedDocumentEmailSettings(
-    document.documentMeta,
+    envelope.documentMeta,
   ).recipientSigningRequest;
 
   if (!isEmailEnabled) {
@@ -72,52 +78,54 @@ export const run = async ({
     emailType: 'RECIPIENT',
     source: {
       type: 'team',
-      teamId: document.teamId,
+      teamId: envelope.teamId,
     },
-    meta: document.documentMeta,
+    meta: envelope.documentMeta,
   });
 
   const i18n = await getI18nInstance(emailLanguage);
 
   // Send confirmation email to the recipient who rejected
-  await io.runTask('send-rejection-confirmation-email', async () => {
-    const recipientTemplate = createElement(DocumentRejectionConfirmedEmail, {
-      recipientName: recipient.name,
-      documentName: document.title,
-      documentOwnerName: document.user.name || document.user.email,
-      reason: recipient.rejectionReason || '',
-      assetBaseUrl: NEXT_PUBLIC_WEBAPP_URL(),
-    });
+  if (isRecipientEmailValidForSending(recipient)) {
+    await io.runTask('send-rejection-confirmation-email', async () => {
+      const recipientTemplate = createElement(DocumentRejectionConfirmedEmail, {
+        recipientName: recipient.name,
+        documentName: envelope.title,
+        documentOwnerName: envelope.user.name || envelope.user.email,
+        reason: recipient.rejectionReason || '',
+        assetBaseUrl: NEXT_PUBLIC_WEBAPP_URL(),
+      });
 
-    const [html, text] = await Promise.all([
-      renderEmailWithI18N(recipientTemplate, { lang: emailLanguage, branding }),
-      renderEmailWithI18N(recipientTemplate, {
-        lang: emailLanguage,
-        branding,
-        plainText: true,
-      }),
-    ]);
+      const [html, text] = await Promise.all([
+        renderEmailWithI18N(recipientTemplate, { lang: emailLanguage, branding }),
+        renderEmailWithI18N(recipientTemplate, {
+          lang: emailLanguage,
+          branding,
+          plainText: true,
+        }),
+      ]);
 
-    await mailer.sendMail({
-      to: {
-        name: recipient.name,
-        address: recipient.email,
-      },
-      from: senderEmail,
-      replyTo: replyToEmail,
-      subject: i18n._(msg`Document "${document.title}" - Rejection Confirmed`),
-      html,
-      text,
+      await mailer.sendMail({
+        to: {
+          name: recipient.name,
+          address: recipient.email,
+        },
+        from: senderEmail,
+        replyTo: replyToEmail,
+        subject: i18n._(msg`Document "${envelope.title}" - Rejection Confirmed`),
+        html,
+        text,
+      });
     });
-  });
+  }
 
   // Send notification email to document owner
   await io.runTask('send-owner-notification-email', async () => {
     const ownerTemplate = createElement(DocumentRejectedEmail, {
       recipientName: recipient.name,
-      documentName: document.title,
-      documentUrl: `${NEXT_PUBLIC_WEBAPP_URL()}${formatDocumentsPath(document.team?.url)}/${
-        document.id
+      documentName: envelope.title,
+      documentUrl: `${NEXT_PUBLIC_WEBAPP_URL()}${formatDocumentsPath(envelope.team?.url)}/${
+        envelope.id
       }`,
       rejectionReason: recipient.rejectionReason || '',
       assetBaseUrl: NEXT_PUBLIC_WEBAPP_URL(),
@@ -138,7 +146,7 @@ export const run = async ({
         address: documentOwner.email,
       },
       from: DOCUMENSO_INTERNAL_EMAIL, // Purposefully using internal email here.
-      subject: i18n._(msg`Document "${document.title}" - Rejected by ${recipient.name}`),
+      subject: i18n._(msg`Document "${envelope.title}" - Rejected by ${recipient.name}`),
       html,
       text,
     });

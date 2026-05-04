@@ -30,8 +30,8 @@ test('[ORGANISATIONS]: manage document preferences', async ({ page }) => {
   await page.getByRole('option', { name: 'Australia/Perth' }).click();
 
   // Set default date
-  await page.getByRole('combobox').filter({ hasText: 'yyyy-MM-dd hh:mm a' }).click();
-  await page.getByRole('option', { name: 'DD/MM/YYYY' }).click();
+  await page.getByRole('combobox').filter({ hasText: 'yyyy-MM-dd hh:mm AM/PM' }).click();
+  await page.getByRole('option', { name: 'DD/MM/YYYY', exact: true }).click();
 
   await page.getByTestId('signature-types-trigger').click();
   await page.getByRole('option', { name: 'Draw' }).click();
@@ -51,7 +51,7 @@ test('[ORGANISATIONS]: manage document preferences', async ({ page }) => {
   expect(teamSettings.documentVisibility).toEqual(DocumentVisibility.MANAGER_AND_ABOVE);
   expect(teamSettings.documentLanguage).toEqual('de');
   expect(teamSettings.documentTimezone).toEqual('Australia/Perth');
-  expect(teamSettings.documentDateFormat).toEqual('dd/MM/yyyy hh:mm a');
+  expect(teamSettings.documentDateFormat).toEqual('dd/MM/yyyy');
   expect(teamSettings.includeSenderDetails).toEqual(false);
   expect(teamSettings.includeSigningCertificate).toEqual(false);
   expect(teamSettings.typedSignatureEnabled).toEqual(true);
@@ -72,7 +72,7 @@ test('[ORGANISATIONS]: manage document preferences', async ({ page }) => {
 
   // Override team date format settings
   await page.getByTestId('document-date-format-trigger').click();
-  await page.getByRole('option', { name: 'MM/DD/YYYY' }).click();
+  await page.getByRole('option', { name: 'MM/DD/YYYY', exact: true }).click();
 
   await page.getByRole('button', { name: 'Update' }).first().click();
   await expect(page.getByText('Your document preferences have been updated').first()).toBeVisible();
@@ -85,7 +85,7 @@ test('[ORGANISATIONS]: manage document preferences', async ({ page }) => {
   expect(updatedTeamSettings.documentVisibility).toEqual(DocumentVisibility.EVERYONE);
   expect(updatedTeamSettings.documentLanguage).toEqual('pl');
   expect(updatedTeamSettings.documentTimezone).toEqual('Europe/London');
-  expect(updatedTeamSettings.documentDateFormat).toEqual('MM/dd/yyyy hh:mm a');
+  expect(updatedTeamSettings.documentDateFormat).toEqual('MM/dd/yyyy');
   expect(updatedTeamSettings.includeSenderDetails).toEqual(false);
   expect(updatedTeamSettings.includeSigningCertificate).toEqual(false);
   expect(updatedTeamSettings.typedSignatureEnabled).toEqual(true);
@@ -96,7 +96,7 @@ test('[ORGANISATIONS]: manage document preferences', async ({ page }) => {
 
   const documentMeta = await prisma.documentMeta.findFirstOrThrow({
     where: {
-      documentId: document.id,
+      id: document.documentMetaId,
     },
   });
 
@@ -108,7 +108,7 @@ test('[ORGANISATIONS]: manage document preferences', async ({ page }) => {
   expect(documentMeta.drawSignatureEnabled).toEqual(false);
   expect(documentMeta.language).toEqual('pl');
   expect(documentMeta.timezone).toEqual('Europe/London');
-  expect(documentMeta.dateFormat).toEqual('MM/dd/yyyy hh:mm a');
+  expect(documentMeta.dateFormat).toEqual('MM/dd/yyyy');
 });
 
 test('[ORGANISATIONS]: manage branding preferences', async ({ page }) => {
@@ -205,9 +205,13 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
   await page.getByRole('textbox', { name: 'Reply to email' }).fill('organisation@documenso.com');
 
   // Update email document settings by enabling/disabling some checkboxes
-  await page.getByRole('checkbox', { name: 'Send recipient signed email' }).uncheck();
-  await page.getByRole('checkbox', { name: 'Send document pending email' }).uncheck();
-  await page.getByRole('checkbox', { name: 'Send document deleted email' }).uncheck();
+  await page.getByRole('checkbox', { name: 'Email the owner when a recipient signs' }).uncheck();
+  await page
+    .getByRole('checkbox', { name: 'Email the signer if the document is still pending' })
+    .uncheck();
+  await page
+    .getByRole('checkbox', { name: 'Email recipients when a pending document is deleted' })
+    .uncheck();
 
   await page.getByRole('button', { name: 'Update' }).first().click();
   await expect(page.getByText('Your email preferences have been updated').first()).toBeVisible();
@@ -225,7 +229,9 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
     documentPending: false, // unchecked
     documentCompleted: true,
     documentDeleted: false, // unchecked
+    ownerRecipientExpired: true,
     ownerDocumentCompleted: true,
+    ownerDocumentCreated: true,
   });
 
   // Edit the team email settings
@@ -240,12 +246,12 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
   await page.getByRole('option', { name: 'Override organisation settings' }).click();
 
   // Update some email settings
-  await page.getByRole('checkbox', { name: 'Send recipient signing request email' }).uncheck();
+  await page.getByRole('checkbox', { name: 'Email recipients with a signing request' }).uncheck();
   await page
-    .getByRole('checkbox', { name: 'Send document completed email', exact: true })
+    .getByRole('checkbox', { name: 'Email recipients when the document is completed', exact: true })
     .uncheck();
   await page
-    .getByRole('checkbox', { name: 'Send document completed email to the owner' })
+    .getByRole('checkbox', { name: 'Email the owner when the document is completed' })
     .uncheck();
 
   await page.getByRole('button', { name: 'Update' }).first().click();
@@ -264,7 +270,9 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
     documentPending: true,
     documentCompleted: false,
     documentDeleted: true,
+    ownerRecipientExpired: true,
     ownerDocumentCompleted: false,
+    ownerDocumentCreated: true,
   });
 
   // Verify that a document can be created successfully with the team email settings
@@ -272,7 +280,7 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
 
   const teamOverrideDocumentMeta = await prisma.documentMeta.findFirstOrThrow({
     where: {
-      documentId: teamOverrideDocument.id,
+      id: teamOverrideDocument.documentMetaId,
     },
   });
 
@@ -284,7 +292,9 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
     documentPending: true,
     documentCompleted: false,
     documentDeleted: true,
+    ownerRecipientExpired: true,
     ownerDocumentCompleted: false,
+    ownerDocumentCreated: true,
   });
 
   // Test inheritance by setting team back to inherit from organisation
@@ -309,7 +319,9 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
     documentPending: false,
     documentCompleted: true,
     documentDeleted: false,
+    ownerRecipientExpired: true,
     ownerDocumentCompleted: true,
+    ownerDocumentCreated: true,
   });
 
   // Verify that a document can be created successfully with the email settings
@@ -317,7 +329,7 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
 
   const documentMeta = await prisma.documentMeta.findFirstOrThrow({
     where: {
-      documentId: document.id,
+      id: document.documentMetaId,
     },
   });
 
@@ -329,6 +341,8 @@ test('[ORGANISATIONS]: manage email preferences', async ({ page }) => {
     documentPending: false,
     documentCompleted: true,
     documentDeleted: false,
+    ownerRecipientExpired: true,
     ownerDocumentCompleted: true,
+    ownerDocumentCreated: true,
   });
 });

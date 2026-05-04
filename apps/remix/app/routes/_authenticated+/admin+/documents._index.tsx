@@ -64,7 +64,7 @@ export default function AdminDocumentsPage() {
         cell: ({ row }) => {
           return (
             <Link
-              to={`/admin/documents/${row.original.id}`}
+              to={`/admin/documents/${row.original.envelopeId}`}
               className="block max-w-[5rem] truncate font-medium hover:underline md:max-w-[10rem]"
             >
               {row.original.title}
@@ -114,7 +114,7 @@ export default function AdminDocumentsPage() {
         },
       },
       {
-        header: 'Last updated',
+        header: _(msg`Last updated`),
         accessorKey: 'updatedAt',
         cell: ({ row }) => i18n.date(row.original.updatedAt),
       },

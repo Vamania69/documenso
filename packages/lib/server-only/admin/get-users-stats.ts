@@ -32,12 +32,13 @@ type GetUserWithDocumentMonthlyGrowthQueryResult = Array<{
 export const getUserWithSignedDocumentMonthlyGrowth = async () => {
   const result = await prisma.$queryRaw<GetUserWithDocumentMonthlyGrowthQueryResult>`
       SELECT
-        DATE_TRUNC('month', "Document"."createdAt") AS "month",
-        COUNT(DISTINCT "Document"."userId") as "count",
-        COUNT(DISTINCT CASE WHEN "Document"."status" = 'COMPLETED' THEN "Document"."userId" END) as "signed_count"
-      FROM "Document"
-      INNER JOIN "Team" ON "Document"."teamId" = "Team"."id"
+        DATE_TRUNC('month', "Envelope"."createdAt") AS "month",
+        COUNT(DISTINCT "Envelope"."userId") as "count",
+        COUNT(DISTINCT CASE WHEN "Envelope"."status" = 'COMPLETED' THEN "Envelope"."userId" END) as "signed_count"
+      FROM "Envelope"
+      INNER JOIN "Team" ON "Envelope"."teamId" = "Team"."id"
       INNER JOIN "Organisation" ON "Team"."organisationId" = "Organisation"."id"
+      WHERE "Envelope"."type" = 'DOCUMENT'::"EnvelopeType"
       GROUP BY "month"
       ORDER BY "month" DESC
       LIMIT 12
@@ -70,7 +71,7 @@ export const getMonthlyActiveUsers = async () => {
         )
         .as('cume_count'),
     ])
-    .where(sql`type = ${UserSecurityAuditLogType.SIGN_IN}::"UserSecurityAuditLogType"`)
+    .where(() => sql`type = ${UserSecurityAuditLogType.SIGN_IN}::"UserSecurityAuditLogType"`)
     .groupBy(({ fn }) => fn('DATE_TRUNC', [sql.lit('MONTH'), 'UserSecurityAuditLog.createdAt']))
     .orderBy('month', 'desc')
     .limit(12);

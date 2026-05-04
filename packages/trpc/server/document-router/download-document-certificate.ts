@@ -1,10 +1,11 @@
-import { DateTime } from 'luxon';
+import { EnvelopeType } from '@prisma/client';
 
-import { NEXT_PUBLIC_WEBAPP_URL } from '@documenso/lib/constants/app';
-import { AppError } from '@documenso/lib/errors/app-error';
-import { encryptSecondaryData } from '@documenso/lib/server-only/crypto/encrypt';
-import { getDocumentById } from '@documenso/lib/server-only/document/get-document-by-id';
+import { PDF_SIZE_A4_72PPI } from '@documenso/lib/constants/pdf';
+import { AppError, AppErrorCode } from '@documenso/lib/errors/app-error';
+import { getEnvelopeWhereInput } from '@documenso/lib/server-only/envelope/get-envelope-by-id';
+import { generateCertificatePdf } from '@documenso/lib/server-only/pdf/generate-certificate-pdf';
 import { isDocumentCompleted } from '@documenso/lib/utils/document';
+import { prisma } from '@documenso/prisma';
 
 import { authenticatedProcedure } from '../trpc';
 import {
@@ -25,22 +26,64 @@ export const downloadDocumentCertificateRoute = authenticatedProcedure
       },
     });
 
-    const document = await getDocumentById({
-      documentId,
+    const { envelopeWhereInput } = await getEnvelopeWhereInput({
+      id: {
+        type: 'documentId',
+        id: documentId,
+      },
+      type: EnvelopeType.DOCUMENT,
       userId: ctx.user.id,
       teamId,
     });
 
-    if (!isDocumentCompleted(document.status)) {
+    const envelope = await prisma.envelope.findFirst({
+      where: envelopeWhereInput,
+      include: {
+        recipients: true,
+        fields: {
+          include: {
+            signature: true,
+          },
+        },
+        documentMeta: true,
+        user: {
+          select: {
+            email: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    if (!envelope) {
+      throw new AppError(AppErrorCode.NOT_FOUND, {
+        message: 'Envelope not found',
+      });
+    }
+
+    if (!isDocumentCompleted(envelope.status)) {
       throw new AppError('DOCUMENT_NOT_COMPLETE');
     }
 
-    const encrypted = encryptSecondaryData({
-      data: document.id.toString(),
-      expiresAt: DateTime.now().plus({ minutes: 5 }).toJSDate().valueOf(),
+    const certificatePdf = await generateCertificatePdf({
+      envelope,
+      recipients: envelope.recipients,
+      fields: envelope.fields,
+      language: envelope.documentMeta.language,
+      envelopeOwner: {
+        email: envelope.user.email,
+        name: envelope.user.name || '',
+      },
+      pageWidth: PDF_SIZE_A4_72PPI.width,
+      pageHeight: PDF_SIZE_A4_72PPI.height,
     });
 
+    const result = await certificatePdf.save();
+
+    const base64 = Buffer.from(result).toString('base64');
+
     return {
-      url: `${NEXT_PUBLIC_WEBAPP_URL()}/__htmltopdf/certificate?d=${encrypted}`,
+      data: base64,
+      envelopeTitle: envelope.title,
     };
   });

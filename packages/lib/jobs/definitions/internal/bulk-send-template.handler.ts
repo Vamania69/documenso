@@ -9,6 +9,7 @@ import { BulkSendCompleteEmail } from '@documenso/email/templates/bulk-send-comp
 import { sendDocument } from '@documenso/lib/server-only/document/send-document';
 import { createDocumentFromTemplate } from '@documenso/lib/server-only/template/create-document-from-template';
 import { getTemplateById } from '@documenso/lib/server-only/template/get-template-by-id';
+import { zEmail } from '@documenso/lib/utils/zod';
 import { prisma } from '@documenso/prisma';
 
 import { getI18nInstance } from '../../../client-only/providers/i18n-server';
@@ -22,7 +23,7 @@ import type { TBulkSendTemplateJobDefinition } from './bulk-send-template';
 const ZRecipientRowSchema = z.object({
   name: z.string().optional(),
   email: z.union([
-    z.string().email({ message: 'Value must be a valid email or empty string' }),
+    zEmail('Value must be a valid email or empty string'),
     z.string().max(0, { message: 'Value must be a valid email or empty string' }),
   ]),
 });
@@ -37,7 +38,10 @@ export const run = async ({
   const { userId, teamId, templateId, csvContent, sendImmediately, requestMetadata } = payload;
 
   const template = await getTemplateById({
-    id: templateId,
+    id: {
+      type: 'templateId',
+      id: templateId,
+    },
     userId,
     teamId,
   });
@@ -46,7 +50,8 @@ export const run = async ({
     throw new Error('Template not found');
   }
 
-  const rows = parse(csvContent, { columns: true, skip_empty_lines: true });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = parse<any>(csvContent, { columns: true, skip_empty_lines: true });
 
   if (rows.length > 100) {
     throw new Error('Maximum 100 rows allowed per upload');
@@ -99,9 +104,12 @@ export const run = async ({
         }
       }
 
-      const document = await io.runTask(`create-document-${rowIndex}`, async () => {
+      const envelope = await io.runTask(`create-document-${rowIndex}`, async () => {
         return await createDocumentFromTemplate({
-          templateId: template.id,
+          id: {
+            type: 'templateId',
+            id: template.id,
+          },
           userId,
           teamId,
           recipients: recipients.map((recipient, index) => {
@@ -124,7 +132,10 @@ export const run = async ({
       if (sendImmediately) {
         await io.runTask(`send-document-${rowIndex}`, async () => {
           await sendDocument({
-            documentId: document.id,
+            id: {
+              type: 'envelopeId',
+              id: envelope.id,
+            },
             userId,
             teamId,
             requestMetadata: {

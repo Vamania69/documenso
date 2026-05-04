@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test';
 import { expect, test } from '@playwright/test';
 
 import { getTemplateById } from '@documenso/lib/server-only/template/get-template-by-id';
+import { mapSecondaryIdToTemplateId } from '@documenso/lib/utils/envelope';
 import { seedBlankTemplate } from '@documenso/prisma/seed/templates';
 import { seedUser } from '@documenso/prisma/seed/users';
 
@@ -16,7 +17,7 @@ const setupTemplate = async (page: Page) => {
   await apiSignin({
     page,
     email: user.email,
-    redirectPath: `/templates/${template.id}/edit`,
+    redirectPath: `/t/${team.url}/templates/${mapSecondaryIdToTemplateId(template.secondaryId)}/edit`,
   });
 
   return { user, team, template };
@@ -41,7 +42,10 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -65,7 +69,10 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -87,7 +94,10 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -109,7 +119,10 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -123,7 +136,7 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await page.getByRole('button', { name: 'Advanced Options' }).click();
 
-    await page.getByRole('combobox').nth(4).click();
+    await page.getByRole('combobox').nth(5).click();
     await page.getByRole('option', { name: 'Draw' }).click();
     await page.getByRole('option', { name: 'Type' }).click();
 
@@ -131,7 +144,10 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -147,14 +163,17 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await page.getByRole('button', { name: 'Advanced Options' }).click();
 
-    await page.getByRole('combobox').nth(5).click();
+    await page.getByRole('combobox').nth(6).click();
     await page.getByRole('option', { name: 'ISO 8601', exact: true }).click();
 
     await triggerAutosave(page);
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -168,14 +187,17 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await page.getByRole('button', { name: 'Advanced Options' }).click();
 
-    await page.getByRole('combobox').nth(6).click();
+    await page.getByRole('combobox').nth(7).click();
     await page.getByRole('option', { name: 'Europe/London' }).click();
 
     await triggerAutosave(page);
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -197,7 +219,10 @@ test.describe('AutoSave Settings Step - Templates', () => {
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });
@@ -222,14 +247,17 @@ test.describe('AutoSave Settings Step - Templates', () => {
     const newExternalId = 'MULTI-TEST-123';
     await page.getByRole('textbox', { name: 'External ID' }).fill(newExternalId);
 
-    await page.getByRole('combobox').nth(6).click();
+    await page.getByRole('combobox').nth(7).click();
     await page.getByRole('option', { name: 'Europe/Berlin' }).click();
 
     await triggerAutosave(page);
 
     await expect(async () => {
       const retrievedTemplate = await getTemplateById({
-        id: template.id,
+        id: {
+          type: 'envelopeId',
+          id: template.id,
+        },
         userId: user.id,
         teamId: team.id,
       });

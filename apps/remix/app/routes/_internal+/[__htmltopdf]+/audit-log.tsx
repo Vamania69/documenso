@@ -1,14 +1,17 @@
 import { msg } from '@lingui/core/macro';
 import { useLingui } from '@lingui/react';
+import { EnvelopeType } from '@prisma/client';
 import { DateTime } from 'luxon';
 import { redirect } from 'react-router';
 
 import { DOCUMENT_STATUS } from '@documenso/lib/constants/document';
 import { APP_I18N_OPTIONS, ZSupportedLanguageCodeSchema } from '@documenso/lib/constants/i18n';
 import { RECIPIENT_ROLES_DESCRIPTION } from '@documenso/lib/constants/recipient-roles';
-import { getEntireDocument } from '@documenso/lib/server-only/admin/get-entire-document';
+import { unsafeGetEntireEnvelope } from '@documenso/lib/server-only/admin/get-entire-document';
 import { decryptSecondaryData } from '@documenso/lib/server-only/crypto/decrypt';
 import { findDocumentAuditLogs } from '@documenso/lib/server-only/document/find-document-audit-logs';
+import { getOrganisationClaimByTeamId } from '@documenso/lib/server-only/organisation/get-organisation-claims';
+import { mapSecondaryIdToDocumentId } from '@documenso/lib/utils/envelope';
 import { getTranslations } from '@documenso/lib/utils/i18n';
 import { Card, CardContent } from '@documenso/ui/primitives/card';
 
@@ -39,20 +42,26 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const documentId = Number(rawDocumentId);
 
-  const document = await getEntireDocument({
-    id: documentId,
+  const envelope = await unsafeGetEntireEnvelope({
+    id: {
+      type: 'documentId',
+      id: documentId,
+    },
+    type: EnvelopeType.DOCUMENT,
   }).catch(() => null);
 
-  if (!document) {
+  if (!envelope) {
     throw redirect('/');
   }
 
-  const documentLanguage = ZSupportedLanguageCodeSchema.parse(document.documentMeta?.language);
+  const organisationClaim = await getOrganisationClaimByTeamId({ teamId: envelope.teamId });
+
+  const documentLanguage = ZSupportedLanguageCodeSchema.parse(envelope.documentMeta?.language);
 
   const { data: auditLogs } = await findDocumentAuditLogs({
     documentId: documentId,
-    userId: document.userId,
-    teamId: document.teamId,
+    userId: envelope.userId,
+    teamId: envelope.teamId,
     perPage: 100_000,
   });
 
@@ -60,7 +69,22 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   return {
     auditLogs,
-    document,
+    document: {
+      id: mapSecondaryIdToDocumentId(envelope.secondaryId),
+      title: envelope.title,
+      status: envelope.status,
+      envelopeId: envelope.id,
+      user: {
+        name: envelope.user.name,
+        email: envelope.user.email,
+      },
+      recipients: envelope.recipients,
+      createdAt: envelope.createdAt,
+      updatedAt: envelope.updatedAt,
+      deletedAt: envelope.deletedAt,
+      documentMeta: envelope.documentMeta,
+    },
+    hidePoweredBy: organisationClaim.flags.hidePoweredBy,
     documentLanguage,
     messages,
   };
@@ -75,7 +99,7 @@ export async function loader({ request }: Route.LoaderArgs) {
  * Update: Maybe <Trans> tags work now after RR7 migration.
  */
 export default function AuditLog({ loaderData }: Route.ComponentProps) {
-  const { auditLogs, document, documentLanguage, messages } = loaderData;
+  const { auditLogs, document, documentLanguage, hidePoweredBy, messages } = loaderData;
 
   const { i18n, _ } = useLingui();
 
@@ -90,9 +114,9 @@ export default function AuditLog({ loaderData }: Route.ComponentProps) {
       <Card>
         <CardContent className="grid grid-cols-2 gap-4 p-6 text-sm print:text-xs">
           <p>
-            <span className="font-medium">{_(msg`Document ID`)}</span>
+            <span className="font-medium">{_(msg`Envelope ID`)}</span>
 
-            <span className="mt-1 block break-words">{document.id}</span>
+            <span className="mt-1 block break-words">{document.envelopeId}</span>
           </p>
 
           <p>
@@ -125,7 +149,7 @@ export default function AuditLog({ loaderData }: Route.ComponentProps) {
             <span className="mt-1 block">
               {DateTime.fromJSDate(document.createdAt)
                 .setLocale(APP_I18N_OPTIONS.defaultLocale)
-                .toFormat('yyyy-mm-dd hh:mm:ss a (ZZZZ)')}
+                .toFormat('yyyy-MM-dd hh:mm:ss a (ZZZZ)')}
             </span>
           </p>
 
@@ -135,7 +159,7 @@ export default function AuditLog({ loaderData }: Route.ComponentProps) {
             <span className="mt-1 block">
               {DateTime.fromJSDate(document.updatedAt)
                 .setLocale(APP_I18N_OPTIONS.defaultLocale)
-                .toFormat('yyyy-mm-dd hh:mm:ss a (ZZZZ)')}
+                .toFormat('yyyy-MM-dd hh:mm:ss a (ZZZZ)')}
             </span>
           </p>
 
@@ -168,11 +192,13 @@ export default function AuditLog({ loaderData }: Route.ComponentProps) {
         <InternalAuditLogTable logs={auditLogs} />
       </div>
 
-      <div className="my-8 flex-row-reverse">
-        <div className="flex items-end justify-end gap-x-4">
-          <BrandingLogo className="max-h-6 print:max-h-4" />
+      {!hidePoweredBy && (
+        <div className="my-8 flex-row-reverse">
+          <div className="flex items-end justify-end gap-x-4">
+            <BrandingLogo className="max-h-6 print:max-h-4" />
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

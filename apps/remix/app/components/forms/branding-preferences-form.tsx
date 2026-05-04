@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useLingui } from '@lingui/react/macro';
-import { Trans } from '@lingui/react/macro';
+import { Trans, useLingui } from '@lingui/react/macro';
 import type { TeamGlobalSettings } from '@prisma/client';
 import { Loader } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
-import { getFile } from '@documenso/lib/universal/upload/get-file';
+import { useCurrentOrganisation } from '@documenso/lib/client-only/providers/organisation';
+import { NEXT_PUBLIC_WEBAPP_URL } from '@documenso/lib/constants/app';
 import { cn } from '@documenso/ui/lib/utils';
 import { Button } from '@documenso/ui/primitives/button';
 import {
@@ -28,6 +28,8 @@ import {
   SelectValue,
 } from '@documenso/ui/primitives/select';
 import { Textarea } from '@documenso/ui/primitives/textarea';
+
+import { useOptionalCurrentTeam } from '~/providers/team';
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
@@ -68,6 +70,9 @@ export function BrandingPreferencesForm({
 }: BrandingPreferencesFormProps) {
   const { t } = useLingui();
 
+  const team = useOptionalCurrentTeam();
+  const organisation = useCurrentOrganisation();
+
   const [previewUrl, setPreviewUrl] = useState<string>('');
   const [hasLoadedPreview, setHasLoadedPreview] = useState(false);
 
@@ -88,14 +93,13 @@ export function BrandingPreferencesForm({
       const file = JSON.parse(settings.brandingLogo);
 
       if ('type' in file && 'data' in file) {
-        void getFile(file).then((binaryData) => {
-          const objectUrl = URL.createObjectURL(new Blob([binaryData]));
+        const logoUrl =
+          context === 'Team'
+            ? `${NEXT_PUBLIC_WEBAPP_URL()}/api/branding/logo/team/${team?.id}`
+            : `${NEXT_PUBLIC_WEBAPP_URL()}/api/branding/logo/organisation/${organisation?.id}`;
 
-          setPreviewUrl(objectUrl);
-          setHasLoadedPreview(true);
-        });
-
-        return;
+        setPreviewUrl(logoUrl + '?v=' + Date.now());
+        setHasLoadedPreview(true);
       }
     }
 
@@ -169,7 +173,7 @@ export function BrandingPreferencesForm({
           />
 
           <div className="relative flex w-full flex-col gap-y-4">
-            {!isBrandingEnabled && <div className="bg-background/60 absolute inset-0 z-[9998]" />}
+            {!isBrandingEnabled && <div className="absolute inset-0 z-[9998] bg-background/60" />}
 
             <FormField
               control={form.control}
@@ -181,7 +185,7 @@ export function BrandingPreferencesForm({
                   </FormLabel>
 
                   <div className="flex flex-col gap-4">
-                    <div className="border-border bg-background relative h-48 w-full overflow-hidden rounded-lg border">
+                    <div className="relative h-48 w-full overflow-hidden rounded-lg border border-border bg-background">
                       {previewUrl ? (
                         <img
                           src={previewUrl}
@@ -189,12 +193,12 @@ export function BrandingPreferencesForm({
                           className="h-full w-full object-contain p-4"
                         />
                       ) : (
-                        <div className="bg-muted/20 dark:bg-muted text-muted-foreground relative flex h-full w-full items-center justify-center text-sm">
+                        <div className="relative flex h-full w-full items-center justify-center bg-muted/20 text-sm text-muted-foreground dark:bg-muted">
                           <Trans>Please upload a logo</Trans>
 
                           {!hasLoadedPreview && (
-                            <div className="bg-muted dark:bg-muted absolute inset-0 z-[999] flex items-center justify-center">
-                              <Loader className="text-muted-foreground h-8 w-8 animate-spin" />
+                            <div className="absolute inset-0 z-[999] flex items-center justify-center bg-muted dark:bg-muted">
+                              <Loader className="h-8 w-8 animate-spin text-muted-foreground" />
                             </div>
                           )}
                         </div>
@@ -239,7 +243,7 @@ export function BrandingPreferencesForm({
                           type="button"
                           variant="link"
                           size="sm"
-                          className="text-destructive text-xs"
+                          className="text-xs text-destructive"
                           onClick={() => {
                             setPreviewUrl('');
                             onChange(null);

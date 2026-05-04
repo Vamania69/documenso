@@ -14,6 +14,7 @@ import {
 } from '@documenso/lib/constants/trpc';
 import type { TDocument } from '@documenso/lib/types/document';
 import { ZDocumentAccessAuthTypesSchema } from '@documenso/lib/types/document-auth';
+import { getDocumentDataUrlForPdfViewer } from '@documenso/lib/utils/envelope-download';
 import { trpc } from '@documenso/trpc/react';
 import { cn } from '@documenso/ui/lib/utils';
 import { Card, CardContent } from '@documenso/ui/primitives/card';
@@ -27,10 +28,10 @@ import { AddSubjectFormPartial } from '@documenso/ui/primitives/document-flow/ad
 import type { TAddSubjectFormSchema } from '@documenso/ui/primitives/document-flow/add-subject.types';
 import { DocumentFlowFormContainer } from '@documenso/ui/primitives/document-flow/document-flow-root';
 import type { DocumentFlowStep } from '@documenso/ui/primitives/document-flow/types';
-import { PDFViewer } from '@documenso/ui/primitives/pdf-viewer';
 import { Stepper } from '@documenso/ui/primitives/stepper';
 import { useToast } from '@documenso/ui/primitives/use-toast';
 
+import PDFViewerLazy from '~/components/general/pdf-viewer/pdf-viewer-lazy';
 import { useCurrentTeam } from '~/providers/team';
 
 export type DocumentEditFormProps = {
@@ -83,7 +84,7 @@ export const DocumentEditForm = ({
     },
   });
 
-  const { mutateAsync: addFields } = trpc.field.addFields.useMutation({
+  const { mutateAsync: addFields } = trpc.field.setFieldsForDocument.useMutation({
     ...DO_NOT_INVALIDATE_QUERY_ON_MUTATION,
     onSuccess: ({ fields: newFields }) => {
       utils.document.get.setData(
@@ -230,6 +231,7 @@ export const DocumentEditForm = ({
         documentId: document.id,
         recipients: data.signers.map((signer) => ({
           ...signer,
+          id: signer.nativeId,
           // Explicitly set to null to indicate we want to remove auth if required.
           actionAuth: signer.actionAuth ?? [],
         })),
@@ -253,6 +255,7 @@ export const DocumentEditForm = ({
           documentId: document.id,
           recipients: data.signers.map((signer) => ({
             ...signer,
+            id: signer.nativeId,
             // Explicitly set to null to indicate we want to remove auth if required.
             actionAuth: signer.actionAuth ?? [],
           })),
@@ -292,7 +295,11 @@ export const DocumentEditForm = ({
   const saveFieldsData = async (data: TAddFieldsFormSchema) => {
     return addFields({
       documentId: document.id,
-      fields: data.fields,
+      fields: data.fields.map((field) => ({
+        ...field,
+        id: field.nativeId,
+        envelopeItemId: document.documentData.envelopeItemId,
+      })),
     });
   };
 
@@ -388,7 +395,7 @@ export const DocumentEditForm = ({
           duration: 5000,
         });
       } else {
-        await navigate(`${documentRootPath}/${document.id}`);
+        await navigate(`${documentRootPath}/${document.envelopeId}`);
       }
     } catch (err) {
       console.error(err);
@@ -434,10 +441,17 @@ export const DocumentEditForm = ({
         gradient
       >
         <CardContent className="p-2">
-          <PDFViewer
-            key={document.documentData.id}
-            documentData={document.documentData}
-            document={document}
+          <PDFViewerLazy
+            key={document.envelopeItems[0]?.id}
+            data={getDocumentDataUrlForPdfViewer({
+              envelopeId: document.envelopeId,
+              envelopeItemId: document.envelopeItems[0]?.id,
+              documentDataId: initialDocument.documentDataId,
+              version: 'current',
+              token: undefined,
+              presignToken: undefined,
+            })}
+            scrollParentRef="window"
             onDocumentLoad={() => setIsDocumentPdfLoaded(true)}
           />
         </CardContent>

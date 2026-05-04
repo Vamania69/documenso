@@ -1,4 +1,5 @@
 import { findDocuments } from '@documenso/lib/server-only/document/find-documents';
+import { mapEnvelopesToDocumentMany } from '@documenso/lib/utils/document';
 
 import { authenticatedProcedure } from '../trpc';
 import {
@@ -37,7 +38,11 @@ export const findDocumentsRoute = authenticatedProcedure
       perPage,
       folderId,
       orderBy: orderByColumn ? { column: orderByColumn, direction: orderByDirection } : undefined,
+      useWindowedCount: false,
     });
 
-    return documents;
+    return {
+      ...documents,
+      data: documents.data.map((envelope) => mapEnvelopesToDocumentMany(envelope)),
+    };
   });

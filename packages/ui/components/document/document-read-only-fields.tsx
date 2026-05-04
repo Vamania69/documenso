@@ -2,13 +2,13 @@ import { useState } from 'react';
 
 import { useLingui } from '@lingui/react';
 import { Trans } from '@lingui/react/macro';
-import type { DocumentMeta, Field, Recipient, TemplateMeta } from '@prisma/client';
+import type { DocumentMeta, Field } from '@prisma/client';
 import { SigningStatus } from '@prisma/client';
 import { Clock, EyeOffIcon } from 'lucide-react';
 
 import { PDF_VIEWER_PAGE_SELECTOR } from '@documenso/lib/constants/pdf-viewer';
 import { isTemplateRecipientEmailPlaceholder } from '@documenso/lib/constants/template';
-import type { DocumentField } from '@documenso/lib/server-only/field/get-fields-for-document';
+import type { TRecipientLite } from '@documenso/lib/types/recipient';
 import { parseMessageDescriptor } from '@documenso/lib/utils/i18n';
 import { extractInitials } from '@documenso/lib/utils/recipient-formatter';
 import { FieldRootContainer } from '@documenso/ui/components/field/field';
@@ -34,9 +34,13 @@ const getRecipientDisplayText = (recipient: { name: string; email: string }) => 
   return recipient.email;
 };
 
+export type DocumentField = Field & {
+  recipient: Pick<TRecipientLite, 'name' | 'email' | 'signingStatus'>;
+};
+
 export type DocumentReadOnlyFieldsProps = {
   fields: DocumentField[];
-  documentMeta?: Pick<DocumentMeta | TemplateMeta, 'dateFormat'>;
+  documentMeta?: Pick<DocumentMeta, 'dateFormat'>;
 
   showFieldStatus?: boolean;
 
@@ -65,7 +69,7 @@ export type DocumentReadOnlyFieldsProps = {
 
 export const mapFieldsWithRecipients = (
   fields: Field[],
-  recipients: Recipient[],
+  recipients: TRecipientLite[],
 ): DocumentField[] => {
   return fields.map((field) => {
     const recipient = recipients.find((recipient) => recipient.id === field.recipientId) || {
@@ -95,10 +99,8 @@ export const DocumentReadOnlyFields = ({
     setHiddenFieldIds((prev) => ({ ...prev, [fieldId]: true }));
   };
 
-  const highestPageNumber = Math.max(...fields.map((field) => field.page));
-
   return (
-    <ElementVisible target={`${PDF_VIEWER_PAGE_SELECTOR}[data-page-number="${highestPageNumber}"]`}>
+    <ElementVisible target={PDF_VIEWER_PAGE_SELECTOR}>
       {fields.map(
         (field) =>
           !hiddenFieldIds[field.secondaryId] && (
@@ -109,10 +111,7 @@ export const DocumentReadOnlyFields = ({
               color={
                 showRecipientColors
                   ? getRecipientColorStyles(
-                      Math.max(
-                        recipientIds.findIndex((id) => id === field.recipientId),
-                        0,
-                      ),
+                      recipientIds.findIndex((id) => id === field.recipientId),
                     )
                   : undefined
               }
@@ -160,7 +159,7 @@ export const DocumentReadOnlyFields = ({
                       </span>
                     </p>
 
-                    <p className="text-muted-foreground mt-1 text-center text-xs">
+                    <p className="mt-1 text-center text-xs text-muted-foreground">
                       {getRecipientDisplayText(field.recipient)}
                     </p>
 
